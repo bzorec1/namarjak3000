@@ -1,12 +1,15 @@
-﻿using System.Diagnostics;
+﻿using System.ComponentModel;
+using System.Diagnostics;
 using System.IO;
 using System.Windows;
 using System.Windows.Input;
 using DocumentFormat.OpenXml.Packaging;
+using DocumentFormat.OpenXml.Spreadsheet;
 using DocumentFormat.OpenXml.Wordprocessing;
 using Microsoft.Win32;
-using OfficeOpenXml;
-using Ookii.Dialogs.Wpf;
+using Break = DocumentFormat.OpenXml.Wordprocessing.Break;
+using Run = DocumentFormat.OpenXml.Wordprocessing.Run;
+using Text = DocumentFormat.OpenXml.Wordprocessing.Text;
 
 namespace Namarjak3000;
 
@@ -124,14 +127,14 @@ public partial class MainWindow : Window
 
     private void BrowseOutputFolder_Click(object sender, RoutedEventArgs e)
     {
-        var dialog = new VistaFolderBrowserDialog();
+        var dialog = new OpenFolderDialog();
 
         if (dialog.ShowDialog() != true)
         {
             return;
         }
 
-        _outputFolder = dialog.SelectedPath;
+        _outputFolder = dialog.DefaultDirectory;
         Log($"Output folder set to: {_outputFolder}");
     }
 
@@ -141,8 +144,7 @@ public partial class MainWindow : Window
         if (string.IsNullOrEmpty(_excelFilePath) || string.IsNullOrEmpty(_wordTemplatePath) ||
             string.IsNullOrEmpty(_outputFolder))
         {
-            MessageBox.Show("Please select Excel files, Word templates, and an output folder.", "Error",
-                MessageBoxButton.OK, MessageBoxImage.Error);
+            ShowError("Please select Excel files, Word templates, and an output folder.");
             return;
         }
 
@@ -155,8 +157,10 @@ public partial class MainWindow : Window
         {
             await Task.Run(() =>
             {
-                int totalRows = 0;
-                totalRows += CountRowsInExcel(_excelFilePath);
+                var excelData = ReadExcelFile(_excelFilePath);
+
+                // TODO remove access data by reading the word template and retrieving the keys
+                var totalRows = excelData.Sum(i => i.Value.Count);
 
                 int processedRows = 0;
                 var progress = new Progress<int>(value => UpdateProgress(value, totalRows));
@@ -186,10 +190,66 @@ public partial class MainWindow : Window
         }
     }
 
+    public static Dictionary<string, List<string>> ReadExcelFile(string excelFilePath)
+    {
+        var headerDictionary = new Dictionary<string, List<string>>();
+
+        using (SpreadsheetDocument document = SpreadsheetDocument.Open(excelFilePath, false))
+        {
+            WorkbookPart workbookPart = document.WorkbookPart;
+            Sheet sheet = workbookPart.Workbook.Sheets.GetFirstChild<Sheet>(); // Get the first sheet
+            WorksheetPart worksheetPart = (WorksheetPart)workbookPart.GetPartById(sheet.Id);
+            SheetData sheetData = worksheetPart.Worksheet.GetFirstChild<SheetData>();
+
+            // Read headers
+            var headerRow = sheetData.Elements<Row>().First();
+            foreach (Cell cell in headerRow.Elements<Cell>())
+            {
+                string header = GetCellValue(document, cell);
+                headerDictionary[header] = new List<string>(); // Initialize list for each header
+            }
+
+            // Read data rows
+            foreach (Row row in sheetData.Elements<Row>().Skip(1)) // Skip header row
+            {
+                int columnIndex = 0;
+                foreach (Cell cell in row.Elements<Cell>())
+                {
+                    string header = GetCellValue(document, headerRow.Elements<Cell>().ElementAt(columnIndex));
+                    string value = GetCellValue(document, cell);
+
+                    if (headerDictionary.ContainsKey(header))
+                    {
+                        headerDictionary[header].Add(value);
+                    }
+
+                    columnIndex++;
+                }
+            }
+        }
+
+        return headerDictionary; // Return the dictionary
+    }
+
+    private static string GetCellValue(SpreadsheetDocument document, Cell cell)
+    {
+        if (cell == null || string.IsNullOrEmpty(cell.InnerText))
+            return string.Empty;
+
+        // If the cell is of type SharedString, retrieve the value from the SharedStringTable
+        if (cell.DataType != null && cell.DataType.Value == CellValues.SharedString)
+        {
+            return document.WorkbookPart.SharedStringTablePart.SharedStringTable.Elements<SharedStringItem>()
+                .ElementAt(int.Parse(cell.InnerText)).InnerText;
+        }
+
+        // Return the cell's value
+        return cell.InnerText;
+    }
+
 // Count the number of rows in the Excel file
     private int CountRowsInExcel(string excelFilePath)
     {
-        ExcelPackage.LicenseContext = LicenseContext.NonCommercial;
         using (var package = new ExcelPackage(new FileInfo(excelFilePath)))
         {
             var worksheet = package.Workbook.Worksheets[0];
