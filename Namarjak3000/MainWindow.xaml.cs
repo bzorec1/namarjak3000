@@ -2,9 +2,16 @@
 using System.IO;
 using System.Windows;
 using System.Windows.Input;
+using DocumentFormat.OpenXml;
 using DocumentFormat.OpenXml.Packaging;
 using DocumentFormat.OpenXml.Spreadsheet;
+using DocumentFormat.OpenXml.Wordprocessing;
 using Microsoft.Win32;
+using Break = DocumentFormat.OpenXml.Wordprocessing.Break;
+using Drawing = DocumentFormat.OpenXml.Wordprocessing.Drawing;
+using Run = DocumentFormat.OpenXml.Wordprocessing.Run;
+using Text = DocumentFormat.OpenXml.Wordprocessing.Text;
+using A = DocumentFormat.OpenXml.Drawing;
 
 namespace Namarjak3000;
 
@@ -21,6 +28,7 @@ public partial class MainWindow : Window
     private string? _excelFilePath;
     private string? _wordTemplatePath;
     private string? _outputFolder;
+    private string? _outputFilePath;
     private int _processedRows;
     private int _totalRows;
     private bool _isEnglish = true;
@@ -145,7 +153,11 @@ public partial class MainWindow : Window
             return;
         }
 
+        _outputFilePath = Path.Combine(_outputFolder,
+            $"{Path.GetFileNameWithoutExtension(_wordTemplatePath)}_Result.docx");
+
         GenerateDocumentsButton.IsEnabled = false;
+        _processedRows = 0;
         ProgressBar.Value = 0;
         ProgressLabel.Text = "Progress: 0/0 rows processed.";
         Log("Starting document generation...");
@@ -154,17 +166,51 @@ public partial class MainWindow : Window
         {
             await Task.Run(() =>
             {
-                var excelData = ReadExcelFile(_excelFilePath);
-                _totalRows = excelData.Sum(i => i.Value.Count) / excelData.Count;
+                Dictionary<string, List<string>> excelData = ReadExcelFile(_excelFilePath);
+                _totalRows = excelData.Max(i => i.Value.Count(x => !string.IsNullOrEmpty(x)));
 
                 UpdateProgress();
 
-                var outputFilePath = Path.Combine(_outputFolder, $"{Path.GetFileNameWithoutExtension(_wordTemplatePath)}_Result.docx");
-
-                for (int i = 0; i < _totalRows; i++)
+                using (WordprocessingDocument template = WordprocessingDocument.Open(_wordTemplatePath, false))
                 {
-                    _processedRows++;
-                    UpdateProgress();
+                    if (template.MainDocumentPart is null)
+                    {
+                        throw new Exception("Template document is missing the main part. Document generation failed.");
+                    }
+                
+                    using (WordprocessingDocument document =
+                           WordprocessingDocument.Create(_outputFilePath, WordprocessingDocumentType.Document))
+                    {
+                        MainDocumentPart mainPart = document.AddMainDocumentPart();
+                        mainPart.Document = new Document(new Body());
+                
+                        for (int i = 0; i < _totalRows; i++)
+                        {
+                            if (mainPart.Document.Body is null)
+                            {
+                                throw new Exception(
+                                    "Newly created document body is empty. Document generation failed. Please try again.");
+                            }
+                
+                            List<Paragraph> currentBody = CopyMainDocumentPartContent(template, document);
+                            
+                            foreach (var paragraph in currentBody)
+                            {
+                                ReplacePlaceholdersInParagraph(paragraph, excelData, i);
+                            }
+                
+                            if (i < _totalRows - 1)
+                            {
+                                AddPageBreak(mainPart);
+                            }
+                
+                            _processedRows++;
+                            UpdateProgress();
+                        }
+                
+                        Debug.Assert(document.MainDocumentPart != null, "document.MainDocumentPart != null");
+                        document.MainDocumentPart.Document.Save();
+                    }
                 }
             });
 
@@ -181,6 +227,64 @@ public partial class MainWindow : Window
         {
             GenerateDocumentsButton.IsEnabled = true;
         }
+    }
+
+    private static List<Paragraph> CopyMainDocumentPartContent(WordprocessingDocument sourceDocument,
+        WordprocessingDocument destinationDocument)
+    {
+        MainDocumentPart sourceMainPart = sourceDocument.MainDocumentPart ?? throw new InvalidOperationException();
+        MainDocumentPart destinationMainPart =
+            destinationDocument.MainDocumentPart ?? throw new InvalidOperationException();
+
+        List<Paragraph> clonedParagraphs = new List<Paragraph>();
+        foreach (var element in sourceMainPart.Document.Body?.Elements()!)
+        {
+            var clonedElement = element.CloneNode(true);
+            destinationMainPart.Document.Body?.Append(clonedElement);
+
+            if (clonedElement is Paragraph paragraph)
+            {
+                clonedParagraphs.Add(paragraph);
+            }
+        }
+
+        return clonedParagraphs;
+    }
+
+    private static void ReplacePlaceholdersInParagraph(Paragraph paragraph, Dictionary<string, List<string>> excelData,
+        int rowIndex)
+    {
+        foreach (var run in paragraph.Elements<Run>())
+        {
+            foreach (var text in run.Elements<Text>())
+            {
+                foreach (var header in excelData.Keys)
+                {
+                    text.Text = text.Text.Replace($"@{header}", ParseData(excelData[header][rowIndex]));
+                }
+            }
+        }
+    }
+
+    private static string ParseData(string value)
+    {
+        if (!decimal.TryParse(value, out decimal numericValue))
+        {
+            return value;
+        }
+
+        return numericValue % 1 == 0 ? ((int)numericValue).ToString() : value;
+    }
+
+
+    private static void AddPageBreak(MainDocumentPart mainPart)
+    {
+        Paragraph pageBreakParagraph = new Paragraph(new Run(new Break
+        {
+            Type = BreakValues.Page
+        }));
+
+        mainPart.Document.Body?.AppendChild(pageBreakParagraph);
     }
 
     public static Dictionary<string, List<string>> ReadExcelFile(string excelFilePath)
