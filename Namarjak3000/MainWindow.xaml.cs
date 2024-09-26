@@ -1,18 +1,15 @@
-﻿using System.ComponentModel;
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using System.IO;
 using System.Windows;
 using System.Windows.Input;
 using DocumentFormat.OpenXml.Packaging;
 using DocumentFormat.OpenXml.Spreadsheet;
-using DocumentFormat.OpenXml.Wordprocessing;
 using Microsoft.Win32;
-using Break = DocumentFormat.OpenXml.Wordprocessing.Break;
-using Run = DocumentFormat.OpenXml.Wordprocessing.Run;
-using Text = DocumentFormat.OpenXml.Wordprocessing.Text;
 
 namespace Namarjak3000;
 
+// ReSharper disable once RedundantExtendsListEntry
+// ReSharper disable once UnusedMember.Global
 public partial class MainWindow : Window
 {
     public MainWindow()
@@ -24,17 +21,19 @@ public partial class MainWindow : Window
     private string? _excelFilePath;
     private string? _wordTemplatePath;
     private string? _outputFolder;
-    private bool isEnglish = true;
+    private int _processedRows;
+    private int _totalRows;
+    private bool _isEnglish = true;
 
     private void LanguageToggleButton_Click(object sender, RoutedEventArgs e)
     {
-        isEnglish = !isEnglish;
+        _isEnglish = !_isEnglish;
         UpdateLanguage();
     }
 
     private void UpdateLanguage()
     {
-        if (isEnglish)
+        if (_isEnglish)
         {
             LanguageToggleButton.Content = "EN";
             WelcomeText.Text = "Welcome to Excel to Word Generator!";
@@ -65,10 +64,10 @@ public partial class MainWindow : Window
 
     private static void Log(string message) => Debug.WriteLine($"[{DateTime.Now}] {message}");
 
-    private void UpdateProgress(int current, int total) => Dispatcher.Invoke(() =>
+    private void UpdateProgress() => Dispatcher.Invoke(() =>
     {
-        ProgressBar.Value = (double)current / total * 100;
-        ProgressLabel.Text = $"Progress: {current}/{total} rows processed.";
+        ProgressBar.Value = (double)_processedRows / _totalRows;
+        ProgressLabel.Text = $"Progress: {_processedRows}/{_totalRows} rows processed.";
     });
 
     private void AddExcelFiles_Click(object sender, RoutedEventArgs e)
@@ -92,16 +91,15 @@ public partial class MainWindow : Window
         }
     }
 
-    private void ShowError(string message)
-    {
+    private void ShowError(string message) =>
         MessageBox.Show(message, "Error", MessageBoxButton.OK, MessageBoxImage.Error);
-    }
 
-    // Allow window dragging
     private void Window_MouseDown(object sender, MouseButtonEventArgs e)
     {
         if (e.ChangedButton == MouseButton.Left)
-            this.DragMove();
+        {
+            DragMove();
+        }
     }
 
     private void AddWordTemplates_Click(object sender, RoutedEventArgs e)
@@ -138,7 +136,6 @@ public partial class MainWindow : Window
         Log($"Output folder set to: {_outputFolder}");
     }
 
-// Generate Word documents with a streaming approach
     private async void GenerateDocuments_Click(object sender, RoutedEventArgs e)
     {
         if (string.IsNullOrEmpty(_excelFilePath) || string.IsNullOrEmpty(_wordTemplatePath) ||
@@ -158,20 +155,17 @@ public partial class MainWindow : Window
             await Task.Run(() =>
             {
                 var excelData = ReadExcelFile(_excelFilePath);
+                _totalRows = excelData.Sum(i => i.Value.Count) / excelData.Count;
 
-                // TODO remove access data by reading the word template and retrieving the keys
-                var totalRows = excelData.Sum(i => i.Value.Count);
+                UpdateProgress();
 
-                int processedRows = 0;
-                var progress = new Progress<int>(value => UpdateProgress(value, totalRows));
+                var outputFilePath = Path.Combine(_outputFolder, $"{Path.GetFileNameWithoutExtension(_wordTemplatePath)}_Result.docx");
 
-                string outputFilePath = Path.Combine(_outputFolder,
-                    $"{Path.GetFileNameWithoutExtension(_wordTemplatePath)}_Result.docx");
-                Log($"Processing template: {_wordTemplatePath} with Excel file: {_excelFilePath}");
-
-                processedRows +=
-                    ProcessTemplateInChunks(_wordTemplatePath, outputFilePath, _excelFilePath, 10, progress);
-                Log($"Generated document: {outputFilePath}");
+                for (int i = 0; i < _totalRows; i++)
+                {
+                    _processedRows++;
+                    UpdateProgress();
+                }
             });
 
             MessageBox.Show("Documents generated successfully!", "Success", MessageBoxButton.OK,
@@ -180,8 +174,7 @@ public partial class MainWindow : Window
         }
         catch (Exception ex)
         {
-            MessageBox.Show($"An error occurred: {ex.Message}", "Error", MessageBoxButton.OK,
-                MessageBoxImage.Error);
+            MessageBox.Show($"An error occurred: {ex.Message}", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
             Log($"Error during document generation: {ex}");
         }
         finally
@@ -194,171 +187,53 @@ public partial class MainWindow : Window
     {
         var headerDictionary = new Dictionary<string, List<string>>();
 
-        using (SpreadsheetDocument document = SpreadsheetDocument.Open(excelFilePath, false))
+        using var document = SpreadsheetDocument.Open(excelFilePath, false);
+
+        var workbookPart = document.WorkbookPart ?? throw new InvalidOperationException();
+        var sheet = workbookPart.Workbook.Sheets?.GetFirstChild<Sheet>() ?? throw new InvalidOperationException();
+        var worksheetPart = (WorksheetPart)workbookPart.GetPartById(sheet.Id!);
+        var sheetData = worksheetPart.Worksheet.GetFirstChild<SheetData>() ?? throw new InvalidOperationException();
+
+        var headerRow = sheetData.Elements<Row>().First();
+        foreach (var cell in headerRow.Elements<Cell>())
         {
-            WorkbookPart workbookPart = document.WorkbookPart;
-            Sheet sheet = workbookPart.Workbook.Sheets.GetFirstChild<Sheet>(); // Get the first sheet
-            WorksheetPart worksheetPart = (WorksheetPart)workbookPart.GetPartById(sheet.Id);
-            SheetData sheetData = worksheetPart.Worksheet.GetFirstChild<SheetData>();
+            var header = GetCellValue(document, cell);
+            headerDictionary[header] = [];
+        }
 
-            // Read headers
-            var headerRow = sheetData.Elements<Row>().First();
-            foreach (Cell cell in headerRow.Elements<Cell>())
+        foreach (var row in sheetData.Elements<Row>().Skip(1))
+        {
+            var columnIndex = 0;
+            foreach (var cell in row.Elements<Cell>())
             {
-                string header = GetCellValue(document, cell);
-                headerDictionary[header] = new List<string>(); // Initialize list for each header
-            }
+                var header = GetCellValue(document, headerRow.Elements<Cell>().ElementAt(columnIndex));
+                var value = GetCellValue(document, cell);
 
-            // Read data rows
-            foreach (Row row in sheetData.Elements<Row>().Skip(1)) // Skip header row
-            {
-                int columnIndex = 0;
-                foreach (Cell cell in row.Elements<Cell>())
+                if (headerDictionary.ContainsKey(header))
                 {
-                    string header = GetCellValue(document, headerRow.Elements<Cell>().ElementAt(columnIndex));
-                    string value = GetCellValue(document, cell);
-
-                    if (headerDictionary.ContainsKey(header))
-                    {
-                        headerDictionary[header].Add(value);
-                    }
-
-                    columnIndex++;
+                    headerDictionary[header].Add(value);
                 }
+
+                columnIndex++;
             }
         }
 
-        return headerDictionary; // Return the dictionary
+        return headerDictionary;
     }
 
     private static string GetCellValue(SpreadsheetDocument document, Cell cell)
     {
         if (cell == null || string.IsNullOrEmpty(cell.InnerText))
+        {
             return string.Empty;
+        }
 
-        // If the cell is of type SharedString, retrieve the value from the SharedStringTable
         if (cell.DataType != null && cell.DataType.Value == CellValues.SharedString)
         {
-            return document.WorkbookPart.SharedStringTablePart.SharedStringTable.Elements<SharedStringItem>()
-                .ElementAt(int.Parse(cell.InnerText)).InnerText;
+            return document.WorkbookPart?.SharedStringTablePart?.SharedStringTable.Elements<SharedStringItem>()
+                .ElementAt(int.Parse(cell.InnerText)).InnerText ?? throw new InvalidOperationException();
         }
 
-        // Return the cell's value
         return cell.InnerText;
-    }
-
-// Count the number of rows in the Excel file
-    private int CountRowsInExcel(string excelFilePath)
-    {
-        using (var package = new ExcelPackage(new FileInfo(excelFilePath)))
-        {
-            var worksheet = package.Workbook.Worksheets[0];
-            return worksheet.Rows.Count() - 1; // Subtract header row
-        }
-    }
-
-    static int ProcessTemplateInChunks(string templatePath, string outputPath, string excelFilePath, int chunkSize,
-        IProgress<int> progress)
-    {
-        int processedRows = 0;
-
-        using (WordprocessingDocument wordDoc = WordprocessingDocument.Create(outputPath,
-                   DocumentFormat.OpenXml.WordprocessingDocumentType.Document))
-        {
-            var mainPart = wordDoc.AddMainDocumentPart();
-            mainPart.Document = new Document(new Body());
-            var body = mainPart.Document.Body;
-
-            var data = ReadExcelDataInChunks(excelFilePath, chunkSize).ToList();
-            foreach (var chunk in data)
-            {
-                foreach (var rowData in chunk)
-                {
-                    // Clone the entire template
-                    var clonedTemplate = CloneAndReplacePlaceholders(GetTemplateBody(templatePath), rowData);
-                    body.Append(clonedTemplate);
-                    body.Append(new Paragraph(new Run(new Break()
-                        { Type = BreakValues.Page }))); // Page break after each clone
-
-                    processedRows++;
-                }
-
-                // Update progress after processing each chunk
-                progress.Report(processedRows);
-            }
-
-            mainPart.Document.Save();
-        }
-
-        return processedRows; // Return the number of processed rows
-    }
-
-// Method to read the template body
-    static Body GetTemplateBody(string templatePath)
-    {
-        using (WordprocessingDocument doc = WordprocessingDocument.Open(templatePath, false))
-        {
-            return (Body)doc.MainDocumentPart.Document.Body.CloneNode(true);
-        }
-    }
-
-// Method to read data from Excel in chunks
-    static IEnumerable<List<Dictionary<string, string>>> ReadExcelDataInChunks(string excelFilePath, int chunkSize)
-    {
-        ExcelPackage.LicenseContext = LicenseContext.NonCommercial;
-
-        using (var package = new ExcelPackage(new FileInfo(excelFilePath)))
-        {
-            var worksheet = package.Workbook.Worksheets[0];
-            var columnNames = worksheet.Cells[1, 1, 1, worksheet.Dimension.End.Column]
-                .Select(cell => cell.Text.Trim())
-                .ToList();
-
-            for (int row = 2; row <= worksheet.Dimension.End.Row; row += chunkSize)
-            {
-                var chunk = new List<Dictionary<string, string>>();
-
-                for (int innerRow = row;
-                     innerRow < row + chunkSize && innerRow <= worksheet.Dimension.End.Row;
-                     innerRow++)
-                {
-                    var rowData = new Dictionary<string, string>();
-                    for (int col = 1; col <= worksheet.Dimension.End.Column; col++)
-                    {
-                        rowData[columnNames[col - 1]] = worksheet.Cells[innerRow, col].Text.Trim();
-                    }
-
-                    chunk.Add(rowData);
-                }
-
-                Log($"Read chunk of {chunk.Count} rows from Excel.");
-                yield return chunk; // Return the entire chunk
-            }
-        }
-    }
-
-// Method to clone the template and replace placeholders
-    static Body CloneAndReplacePlaceholders(Body templateBody, Dictionary<string, string> replacements)
-    {
-        var clonedBody = (Body)templateBody.CloneNode(true);
-
-        foreach (var paragraph in clonedBody.Descendants<Paragraph>())
-        {
-            foreach (var run in paragraph.Descendants<Run>())
-            {
-                foreach (var text in run.Descendants<Text>())
-                {
-                    foreach (var key in replacements.Keys)
-                    {
-                        if (text.Text.Contains($"@{key}"))
-                        {
-                            text.Text = text.Text.Replace($"@{key}", replacements[key]);
-                        }
-                    }
-                }
-            }
-        }
-
-        return clonedBody;
     }
 }
