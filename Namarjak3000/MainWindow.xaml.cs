@@ -66,7 +66,7 @@ public partial class MainWindow : Window
 
     private void UpdateProgress() => Dispatcher.Invoke(() =>
     {
-        ProgressBar.Value = (double)_processedRows / _totalRows;
+        ProgressBar.Value = (double)_processedRows / _totalRows * 100;
         ProgressLabel.Text = $"Progress: {_processedRows}/{_totalRows} rows processed.";
     });
 
@@ -132,7 +132,7 @@ public partial class MainWindow : Window
             return;
         }
 
-        _outputFolder = dialog.DefaultDirectory;
+        _outputFolder = dialog.FolderName;
         Log($"Output folder set to: {_outputFolder}");
     }
 
