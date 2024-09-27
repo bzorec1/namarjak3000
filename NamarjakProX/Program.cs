@@ -128,7 +128,7 @@ public class Program
                                 {
                                     foreach (var header in excelData.Keys)
                                     {
-                                        text.Text = text.Text.Replace($"@{header}", ParseData(excelData[header][i]));
+                                        text.Text = text.Text.Replace($"@{header.ToLowerInvariant()}", ParseData(excelData[header][i].ToLowerInvariant().TrimEnd()));
                                     }
                                 }
                             }
@@ -158,7 +158,7 @@ public class Program
 
     private static string ParseData(string value)
     {
-        if (!decimal.TryParse(value, out decimal numericValue))
+        if (!decimal.TryParse(value, out var numericValue))
         {
             return value;
         }
