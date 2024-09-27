@@ -1,5 +1,5 @@
 # License
-The Open XML SDK is licensed under the [MIT]("") license.
+The Open XML SDK is licensed under the [MIT]("https://github.com/bzorec1/namarjak3000?tab=MIT-1-ov-file") license.
 
 # Notice
 
