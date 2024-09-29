@@ -1,4 +1,5 @@
-﻿using System.IO.Compression;
+﻿using System.Collections.Concurrent;
+using System.IO.Compression;
 using DocumentFormat.OpenXml.Packaging;
 using DocumentFormat.OpenXml.Spreadsheet;
 using WP = DocumentFormat.OpenXml.Wordprocessing;
@@ -36,124 +37,147 @@ public class Program
         Console.WriteLine();
         Console.WriteLine("3. Save the Excel file in .xlsx format and the Word document in .docx format.");
         Console.WriteLine("   Note their file paths for the next steps.\n");
-        Console.WriteLine("CTRL + C to exit.\n");
-        Console.WriteLine();
 
-        string excelFilePath = string.Empty;
-        string sourceFilePath = string.Empty;
-
-        while (string.IsNullOrEmpty(excelFilePath) || string.IsNullOrEmpty(sourceFilePath))
+        while (true)
         {
-            if (string.IsNullOrEmpty(excelFilePath))
-            {
-                Console.WriteLine("Enter the path to the Excel file:");
-                excelFilePath = Console.ReadLine() ?? string.Empty;
-            }
+            Console.WriteLine("\nCTRL + C to exit.");
+            Console.WriteLine();
 
-            if (string.IsNullOrEmpty(sourceFilePath))
-            {
-                Console.WriteLine("Enter the path to the source file (template .docx):");
-                sourceFilePath = Console.ReadLine() ?? string.Empty;
-            }
+            string excelFilePath = string.Empty;
+            string sourceFilePath = string.Empty;
 
-            try
+            while (string.IsNullOrEmpty(excelFilePath) || string.IsNullOrEmpty(sourceFilePath))
             {
-                if (!string.IsNullOrEmpty(excelFilePath) && !File.Exists(excelFilePath))
+                if (string.IsNullOrEmpty(excelFilePath))
                 {
-                    Console.WriteLine($"Error: The Excel file '{excelFilePath}' does not exist.");
-                    excelFilePath = string.Empty;
+                    Console.WriteLine("Enter the path to the Excel file:");
+                    excelFilePath = Console.ReadLine()?.Trim('\"') ?? string.Empty;
                 }
 
-                if (!string.IsNullOrEmpty(sourceFilePath) && !File.Exists(sourceFilePath))
+                if (string.IsNullOrEmpty(sourceFilePath))
                 {
-                    Console.WriteLine($"Error: The source file '{sourceFilePath}' does not exist.");
+                    Console.WriteLine("Enter the path to the source file (template .docx):");
+                    sourceFilePath = Console.ReadLine()?.Trim('\"') ?? string.Empty;
+                }
+
+                try
+                {
+                    if (!string.IsNullOrEmpty(excelFilePath) && !File.Exists(excelFilePath))
+                    {
+                        Console.WriteLine($"Error: The Excel file '{excelFilePath}' does not exist.");
+                        excelFilePath = string.Empty;
+                    }
+
+                    if (!string.IsNullOrEmpty(sourceFilePath) && !File.Exists(sourceFilePath))
+                    {
+                        Console.WriteLine($"Error: The source file '{sourceFilePath}' does not exist.");
+                        sourceFilePath = string.Empty;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"An error occurred: {ex.Message}");
+                    excelFilePath = string.Empty;
                     sourceFilePath = string.Empty;
                 }
             }
-            catch (Exception ex)
+
+            string baseFileName = Path.GetFileNameWithoutExtension(sourceFilePath);
+
+            string destinationDirectory =
+                Path.Combine(Path.GetDirectoryName(sourceFilePath) ?? string.Empty, baseFileName);
+            Directory.CreateDirectory(destinationDirectory);
+
+            foreach (var file in Directory.GetFiles(destinationDirectory))
             {
-                Console.WriteLine($"An error occurred: {ex.Message}");
-                excelFilePath = string.Empty;
-                sourceFilePath = string.Empty;
+                File.Delete(file);
             }
-        }
 
-        string baseFileName = Path.GetFileNameWithoutExtension(sourceFilePath);
-
-        string destinationDirectory = Path.Combine(Path.GetDirectoryName(sourceFilePath) ?? string.Empty, baseFileName);
-        Directory.CreateDirectory(destinationDirectory);
-
-        foreach (var file in Directory.GetFiles(destinationDirectory))
-        {
-            File.Delete(file);
-        }
-
-        string fileExtension = Path.GetExtension(sourceFilePath);
-        Console.WriteLine("Starting to copy and process files...");
-        using (var progressBar = new ProgressBar())
-        {
-            await Task.Run(() =>
+            string fileExtension = Path.GetExtension(sourceFilePath);
+            Console.WriteLine("Starting to copy and process files...");
+            using (var progressBar = new ProgressBar())
             {
                 Dictionary<string, List<string>> excelData = ReadExcelFile(excelFilePath);
                 _totalRows = excelData.Max(i => i.Value.Count(x => !string.IsNullOrEmpty(x)));
 
-                for (int i = 0; i <= _totalRows; i++)
+                // Create a partitioner to divide the work
+                var rangePartitioner = Partitioner.Create(0, _totalRows + 1);
+
+                // Use a counter to track progress
+                int progressCount = 0;
+
+                // Run the document creation in parallel with 4 threads
+                await Task.Run(() =>
                 {
-                    string newFileName = $"{baseFileName}_{i + 1}{fileExtension}";
-                    string destinationFilePath = Path.Combine(destinationDirectory, newFileName);
-
-                    File.Copy(sourceFilePath, destinationFilePath, overwrite: false);
-
-                    using (WordprocessingDocument document =
-                           WordprocessingDocument.Open(destinationFilePath, true))
+                    Parallel.ForEach(rangePartitioner, new ParallelOptions { MaxDegreeOfParallelism = 4 }, range =>
                     {
-                        MainDocumentPart mainPart = document.MainDocumentPart ?? throw new InvalidOperationException();
-
-                        if (mainPart.Document.Body is null)
+                        for (int i = range.Item1; i < range.Item2; i++)
                         {
-                            throw new Exception(
-                                "Newly created document body is empty. Document generation failed. Please try again.");
-                        }
+                            string newFileName = $"{baseFileName}_{i + 1}{fileExtension}";
+                            string destinationFilePath = Path.Combine(destinationDirectory, newFileName);
 
-                        foreach (var element in mainPart.Document.Body?.Elements()!)
-                        {
-                            if (element is not WP.Paragraph paragraph)
-                            {
-                                continue;
-                            }
+                            File.Copy(sourceFilePath, destinationFilePath, overwrite: false);
 
-                            foreach (var run in paragraph.Elements<WP.Run>())
+                            // Process each document
+                            using (WordprocessingDocument document =
+                                   WordprocessingDocument.Open(destinationFilePath, true))
                             {
-                                foreach (var text in run.Elements<WP.Text>())
+                                MainDocumentPart mainPart =
+                                    document.MainDocumentPart ?? throw new InvalidOperationException();
+
+                                if (mainPart.Document.Body is null)
                                 {
-                                    foreach (var header in excelData.Keys)
+                                    throw new Exception(
+                                        "Newly created document body is empty. Document generation failed. Please try again.");
+                                }
+
+                                foreach (var element in mainPart.Document.Body?.Elements()!)
+                                {
+                                    if (element is not WP.Paragraph paragraph)
                                     {
-                                        text.Text = text.Text.Replace($"@{header.ToLowerInvariant()}", ParseData(excelData[header][i].ToLowerInvariant().TrimEnd()));
+                                        continue;
+                                    }
+
+                                    foreach (var run in paragraph.Elements<WP.Run>())
+                                    {
+                                        foreach (var text in run.Elements<WP.Text>())
+                                        {
+                                            foreach (var header in excelData.Keys)
+                                            {
+                                                text.Text = text.Text.Replace(
+                                                    $"@{header}",
+                                                    ParseData(excelData[header][i]));
+                                            }
+                                        }
                                     }
                                 }
+
+                                document.Save();
                             }
+
+                            // Update the progress counter in a thread-safe manner
+                            Interlocked.Increment(ref progressCount);
+                            progressBar.Report((double)progressCount / _totalRows);
                         }
+                    });
+                });
+            }
 
-                        document.Save();
-                    }
+            Console.WriteLine("\nZipping the folder...");
 
-                    progressBar.Report((double)(i + 1) / _totalRows);
-                }
-            });
+            string zipFilePath =
+                Path.Combine(Path.GetDirectoryName(sourceFilePath) ?? string.Empty, $"{baseFileName}.zip");
+
+            if (File.Exists(zipFilePath))
+            {
+                File.Delete(zipFilePath);
+            }
+
+            ZipFile.CreateFromDirectory(destinationDirectory, zipFilePath);
+            Console.WriteLine($"Zipped the folder to: {zipFilePath}");
+
+            Console.Clear();
         }
-
-        Console.WriteLine("\nZipping the folder...");
-
-        string zipFilePath =
-            Path.Combine(Path.GetDirectoryName(sourceFilePath) ?? string.Empty, $"{baseFileName}.zip");
-
-        if (File.Exists(zipFilePath))
-        {
-            File.Delete(zipFilePath);
-        }
-
-        ZipFile.CreateFromDirectory(destinationDirectory, zipFilePath);
-        Console.WriteLine($"Zipped the folder to: {zipFilePath}");
     }
 
     private static string ParseData(string value)
