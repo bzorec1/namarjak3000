@@ -12,9 +12,8 @@ public class Program
 
     public static async Task Main(string[] args)
     {
-        Console.WriteLine("Welcome to NamarjakProX - Template Document Copier");
-        Console.WriteLine(
-            "This application copies a template Word document and replaces placeholders based on an Excel file.");
+        Console.WriteLine("Welcome to NamarjakProXLegacy - Template Document Copier");
+        Console.WriteLine("This application copies a template Word document and replaces placeholders based on an Excel file.");
         Console.WriteLine();
 
         Console.WriteLine("Enable debug mode? (y/n):");
@@ -45,7 +44,7 @@ public class Program
 
                     if (excelFilePath.ToLower() == "q")
                     {
-                        Console.WriteLine("NamarjakProX se je zmantro!");
+                        Console.WriteLine("NamarjakProXLegacy se je zmantro!");
                         return;
                     }
                 }

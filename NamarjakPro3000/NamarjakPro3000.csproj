@@ -2,25 +2,17 @@
 
     <PropertyGroup>
         <OutputType>Exe</OutputType>
-        <TargetFramework>net8.0</TargetFramework>
+        <TargetFramework>net9.0</TargetFramework>
         <ImplicitUsings>enable</ImplicitUsings>
         <Nullable>enable</Nullable>
-        <RuntimeIdentifier>win-x64</RuntimeIdentifier>
-        <SelfContained>true</SelfContained>
     </PropertyGroup>
-
-    <ItemGroup>
-      <PackageReference Include="DocumentFormat.OpenXml" Version="3.1.0" />
-    </ItemGroup>
 
     <ItemGroup>
       <Content Include="..\LICENSE.txt">
         <Link>LICENSE.txt</Link>
-        <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       </Content>
       <Content Include="..\README.md">
         <Link>README.md</Link>
-        <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       </Content>
     </ItemGroup>
 

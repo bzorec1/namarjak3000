@@ -1,6 +1,8 @@
 ﻿
 Microsoft Visual Studio Solution File, Format Version 12.00
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "NamarjakProX", "NamarjakProX\NamarjakProX.csproj", "{EA267DFA-4BA5-4503-A1FD-D9D1EE343343}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "NamarjakProXLegacy", "NamarjakProXLegacy\NamarjakProXLegacy.csproj", "{EA267DFA-4BA5-4503-A1FD-D9D1EE343343}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "NamarjakPro3000", "NamarjakPro3000\NamarjakPro3000.csproj", "{4D842E63-7E05-4FBD-9467-C7CBA36C7835}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -13,5 +15,9 @@ Global
 		{EA267DFA-4BA5-4503-A1FD-D9D1EE343343}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{EA267DFA-4BA5-4503-A1FD-D9D1EE343343}.Release|Any CPU.Deploy.0 = Release|Any CPU
 		{EA267DFA-4BA5-4503-A1FD-D9D1EE343343}.Release|Any CPU.Build.0 = Release|Any CPU
+		{4D842E63-7E05-4FBD-9467-C7CBA36C7835}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{4D842E63-7E05-4FBD-9467-C7CBA36C7835}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{4D842E63-7E05-4FBD-9467-C7CBA36C7835}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{4D842E63-7E05-4FBD-9467-C7CBA36C7835}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 EndGlobal
